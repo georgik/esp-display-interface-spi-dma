@@ -2,6 +2,13 @@
 name = "esp-display-interface-spi-dma"
 version = "0.1.0"
 edition = "2021"
+authors = [
+    "bjoernQ <bjoern.quentin@mobile-j.de>",
+    "Juraj Michálek <juraj.michalek@espressif.com>"
+]
+description = "Rust Bare Metal SPI Display Interface with DMA support for ESP32 chips"
+repository  = "https://github.com/georgik/esp-display-interface-spi-dma"
+license     = "MIT OR Apache-2.0"
 
 [dependencies]
 byte-slice-cast = { version = "0.3.5", default-features = false }
