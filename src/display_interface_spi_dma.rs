@@ -2,52 +2,44 @@
 
 use core::cell::RefCell;
 
-#[cfg(feature = "esp32")]
-use esp32_hal as hal;
-#[cfg(feature = "esp32c3")]
-use esp32c3_hal as hal;
-#[cfg(feature = "esp32c6")]
-use esp32c6_hal as hal;
-#[cfg(feature = "esp32s2")]
-use esp32s2_hal as hal;
-#[cfg(feature = "esp32s3")]
-use esp32s3_hal as hal;
 
 use byte_slice_cast::AsByteSlice;
 use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
-use hal::gpio::{Output, OutputPin, PushPull};
-use hal::spi::master::dma::SpiDmaTransfer;
-use hal::spi::master::InstanceDma;
-use hal::{
+use esp_hal::{
+    gpio::{Output, OutputPin, PushPull},
+    spi::{
+        master::{dma::SpiDmaTransfer, InstanceDma},
+        DuplexMode, IsFullDuplex,
+    },
     dma::{ChannelTypes, SpiPeripheral},
     prelude::_esp_hal_dma_DmaTransfer,
-    spi::{DuplexMode, IsFullDuplex},
 };
 
 const DMA_BUFFER_SIZE: usize = 4096;
-type SpiDma<'d, T, C, M> = hal::spi::master::dma::SpiDma<'d, T, C, M>;
+type SpiDma<'d, T, C, M, DmaMode> = esp_hal::spi::master::dma::SpiDma<'d, T, C, M, DmaMode>;
 
 /// SPI display interface.
 ///
 /// This combines the SPI peripheral and a data/command as well as a chip-select pin
-pub struct SPIInterface<'d, DC, CS, T, C, M>
+pub struct SPIInterface<'d, DC, CS, T, C, M, DmaMode>
 where
     DC: OutputPin,
     CS: OutputPin,
     T: InstanceDma<C::Tx<'d>, C::Rx<'d>>,
     C: ChannelTypes,
     C::P: SpiPeripheral,
-    M: DuplexMode,
+    M: DuplexMode + esp_hal::Mode,
+    DmaMode: _esp_hal_dma_DmaTransfer + esp_hal::Mode,
 {
     avg_data_len_hint: usize,
-    spi: RefCell<Option<SpiDma<'d, T, C, M>>>,
-    transfer: RefCell<Option<SpiDmaTransfer<'d, T, C, &'static mut [u8], M>>>,
+    spi: RefCell<Option<SpiDma<'d, T, C, M, DmaMode>>>,
+    transfer: RefCell<Option<SpiDmaTransfer<'d, 'd,  T, C, &'static mut [u8], M>>>,
     dc: DC,
     cs: Option<CS>,
 }
 
 #[allow(unused)]
-impl<'d, DC, CS, T, C, M> SPIInterface<'d, DC, CS, T, C, M>
+impl<'d, DC, CS, T, C, M, DmaMode> SPIInterface<'d, DC, CS, T, C, M, DmaMode>
 where
     DC: OutputPin,
     CS: OutputPin,
@@ -56,7 +48,7 @@ where
     C::P: SpiPeripheral,
     M: DuplexMode,
 {
-    pub fn new(avg_data_len_hint: usize, spi: SpiDma<'d, T, C, M>, dc: DC, cs: CS) -> Self {
+    pub fn new(avg_data_len_hint: usize, spi: SpiDma<'d, T, C, M, DmaMode>, dc: DC, cs: CS) -> Self {
         Self {
             avg_data_len_hint,
             spi: RefCell::new(Some(spi)),
@@ -68,7 +60,7 @@ where
 
     /// Consume the display interface and return
     /// the underlying peripheral driver and GPIO pins used by it
-    pub fn release(self) -> (SpiDma<'d, T, C, M>, DC, Option<CS>) {
+    pub fn release(self) -> (SpiDma<'d, T, C, M, DmaMode>, DC, Option<CS>) {
         (self.spi.take().unwrap(), self.dc, self.cs)
     }
 
@@ -211,11 +203,11 @@ where
     }
 }
 
-pub fn new_no_cs<'d, DC, T, C, M>(
+pub fn new_no_cs<'d, DC, T, C, M, DmaMode>(
     avg_data_len_hint: usize,
-    spi: SpiDma<'d, T, C, M>,
+    spi: SpiDma<'d, T, C, M, DmaMode>,
     dc: DC,
-) -> SPIInterface<'d, DC, hal::gpio::Gpio0<Output<PushPull>>, T, C, M>
+) -> SPIInterface<'d, DC, esp_hal::gpio::Gpio0<Output<PushPull>>, T, C, M, DmaMode>
 where
     DC: OutputPin,
     T: InstanceDma<C::Tx<'d>, C::Rx<'d>>,
@@ -228,14 +220,14 @@ where
         spi: RefCell::new(Some(spi)),
         transfer: RefCell::new(None),
         dc,
-        cs: None::<hal::gpio::Gpio0<Output<PushPull>>>,
+        cs: None::<esp_hal::gpio::Gpio0<Output<PushPull>>>,
     }
 }
 
-impl<'d, DC, CS, T, C, M> WriteOnlyDataCommand for SPIInterface<'d, DC, CS, T, C, M>
+impl<'d, DC, CS, T, C, M, DmaMode> WriteOnlyDataCommand for SPIInterface<'d, DC, CS, T, C, M, DmaMode>
 where
-    DC: OutputPin + hal::prelude::_embedded_hal_digital_v2_OutputPin,
-    CS: OutputPin + hal::prelude::_embedded_hal_digital_v2_OutputPin,
+    DC: OutputPin ,
+    CS: OutputPin,
     T: InstanceDma<C::Tx<'d>, C::Rx<'d>>,
     C: ChannelTypes,
     C::P: SpiPeripheral,
