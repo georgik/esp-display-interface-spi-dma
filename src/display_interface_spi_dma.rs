@@ -159,7 +159,7 @@ impl<'d> SPIInterface<'d> {
             if idx > 0 {
                 let mut dma_buffer = DmaTxBuf::new(descriptors(), buffer).unwrap();
                 dma_buffer.set_length(idx);
-                transfer = Some(spi.take().unwrap().write(dma_buffer).unwrap());
+                transfer = Some(spi.take().unwrap().write(dma_buffer.len(), dma_buffer).unwrap());
                 current_buffer = (current_buffer + 1) % 2;
             } else {
                 break;
