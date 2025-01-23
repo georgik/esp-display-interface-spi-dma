@@ -100,7 +100,7 @@ impl<'d> SPIInterface<'d> {
 
     fn single_transfer(&mut self, send_buffer: &'static mut [u8]) {
         let mut buffer = DmaTxBuf::new(descriptors(), send_buffer).unwrap();
-        let transfer = self.spi.take().unwrap().write(buffer).unwrap();
+        let transfer = self.spi.take().unwrap().write(buffer.len(), buffer).unwrap();
         let (reclaimed_spi, _) = transfer.wait();
         self.spi.replace(Some(reclaimed_spi));
     }
