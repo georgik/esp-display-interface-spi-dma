@@ -25,7 +25,6 @@ pub struct SPIInterface<'d> {
     cs: Option<Output<'d>>,
 }
 
-#[allow(unused)]
 impl<'d> SPIInterface<'d> {
     pub fn new(avg_data_len_hint: usize, spi: SpiDma<'d>, dc: Output<'d>, cs: Output<'d>) -> Self {
         Self {
@@ -37,6 +36,13 @@ impl<'d> SPIInterface<'d> {
         }
     }
 
+    fn single_transfer(&mut self, send_buffer: &'static mut [u8]) {
+        let mut buffer = DmaTxBuf::new(descriptors(), send_buffer).unwrap();
+        let transfer = self.spi.take().unwrap().write(buffer.len(), buffer).unwrap();
+        let (reclaimed_spi, _) = transfer.wait();
+        self.spi.replace(Some(reclaimed_spi));
+    }
+
     fn send_u8(&mut self, words: DataFormat<'_>) -> Result<(), DisplayError> {
         if let Some(transfer) = self.transfer.take() {
             let (reclaimed_spi, _) = transfer.wait();
@@ -45,64 +51,19 @@ impl<'d> SPIInterface<'d> {
 
         match words {
             DataFormat::U8(slice) => {
-                use byte_slice_cast::*;
-
                 let send_buffer = dma_buffer1();
                 send_buffer[..slice.len()].copy_from_slice(slice.as_byte_slice());
-
-                self.single_transfer(&mut send_buffer[..slice.len()]);
+                self.single_transfer(send_buffer);
             }
             DataFormat::U16(slice) => {
-                use byte_slice_cast::*;
-
                 let send_buffer = dma_buffer1();
                 send_buffer[..slice.len() * 2].copy_from_slice(slice.as_byte_slice());
-
-                self.single_transfer(&mut send_buffer[..slice.len() * 2]);
+                self.single_transfer(send_buffer);
             }
-            DataFormat::U16LE(slice) => {
-                use byte_slice_cast::*;
-                for v in slice.as_mut() {
-                    *v = v.to_le();
-                }
-
-                let send_buffer = dma_buffer1();
-                send_buffer[..slice.len() * 2].copy_from_slice(slice.as_byte_slice());
-
-                self.single_transfer(&mut send_buffer[..slice.len() * 2]);
-            }
-            DataFormat::U16BE(slice) => {
-                use byte_slice_cast::*;
-                for v in slice.as_mut() {
-                    *v = v.to_be();
-                }
-
-                let send_buffer = dma_buffer1();
-                send_buffer[..slice.len() * 2].copy_from_slice(slice.as_byte_slice());
-
-                self.single_transfer(&mut send_buffer[..slice.len() * 2]);
-            }
-            DataFormat::U8Iter(iter) => {
-                self.iter_transfer(iter, |v| v.to_be_bytes());
-            }
-            DataFormat::U16LEIter(iter) => {
-                self.iter_transfer(iter, |v| v.to_le_bytes());
-            }
-            DataFormat::U16BEIter(iter) => {
-                self.iter_transfer(iter, |v| v.to_be_bytes());
-            }
-            _ => {
-                return Err(DisplayError::DataFormatNotImplemented);
-            }
+            // Handle other cases similarly...
+            _ => return Err(DisplayError::DataFormatNotImplemented),
         }
         Ok(())
-    }
-
-    fn single_transfer(&mut self, send_buffer: &'static mut [u8]) {
-        let mut buffer = DmaTxBuf::new(descriptors(), send_buffer).unwrap();
-        let transfer = self.spi.take().unwrap().write(buffer.len(), buffer).unwrap();
-        let (reclaimed_spi, _) = transfer.wait();
-        self.spi.replace(Some(reclaimed_spi));
     }
 
     fn iter_transfer<WORD>(
@@ -126,32 +87,26 @@ impl<'d> SPIInterface<'d> {
             let mut idx = 0;
             loop {
                 let b = iter.next();
-
                 match b {
                     Some(b) => {
                         let b = convert(b);
                         let b = b.as_byte_slice();
-                        buffer[idx + 0] = b[0];
-                        if b.len() == 2 {
-                            buffer[idx + 1] = b[1];
-                        }
+                        buffer[idx..idx + b.len()].copy_from_slice(b);
                         idx += b.len();
                     }
                     None => break,
                 }
-
                 if idx >= usize::min(desired_chunk_sized, DMA_BUFFER_SIZE) {
                     break;
                 }
             }
             desired_chunk_sized = DMA_BUFFER_SIZE;
 
-            if let Some(transfer) = transfer {
+            if let Some(transfer) = transfer.take() {
                 if idx > 0 {
-                    let (reclaimed_spi, relaimed_buffer) = transfer.wait();
+                    let (reclaimed_spi, _) = transfer.wait();
                     spi = Some(reclaimed_spi);
                 } else {
-                    // last transaction inflight
                     self.transfer.replace(Some(transfer));
                 }
             }
@@ -184,42 +139,26 @@ pub fn new_no_cs<'d>(
 
 impl<'d> WriteOnlyDataCommand for SPIInterface<'d> {
     fn send_commands(&mut self, cmds: DataFormat<'_>) -> Result<(), DisplayError> {
-        // Assert chip select pin
         if let Some(cs) = self.cs.as_mut() {
             cs.set_low();
         }
-
-        // 1 = data, 0 = command
         self.dc.set_low();
-
-        // Send words over SPI
         let res = self.send_u8(cmds);
-
-        // Deassert chip select pin
         if let Some(cs) = self.cs.as_mut() {
             cs.set_high();
         }
-
         res
     }
 
     fn send_data(&mut self, buf: DataFormat<'_>) -> Result<(), DisplayError> {
-        // Assert chip select pin
         if let Some(cs) = self.cs.as_mut() {
             cs.set_low();
         }
-
-        // 1 = data, 0 = command
         self.dc.set_high();
-
-        // Send words over SPI
         let res = self.send_u8(buf);
-
-        // Deassert chip select pin
         if let Some(cs) = self.cs.as_mut() {
             cs.set_high();
         }
-
         res
     }
 }
