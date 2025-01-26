@@ -100,7 +100,7 @@ impl<'d> SPIInterface<'d> {
 
     fn single_transfer(&mut self, send_buffer: &'static mut [u8]) {
         let mut buffer = DmaTxBuf::new(descriptors(), send_buffer).unwrap();
-        let transfer = self.spi.take().unwrap().write(0_u8, buffer).unwrap();
+        let transfer = self.spi.take().unwrap().write(0_usize, buffer).unwrap();
         let (reclaimed_spi, _) = transfer.wait();
         self.spi.replace(Some(reclaimed_spi));
     }
@@ -159,7 +159,7 @@ impl<'d> SPIInterface<'d> {
             if idx > 0 {
                 let mut dma_buffer = DmaTxBuf::new(descriptors(), buffer).unwrap();
                 dma_buffer.set_length(idx);
-                transfer = Some(spi.take().unwrap().write(0_u8, dma_buffer).unwrap());
+                transfer = Some(spi.take().unwrap().write(0_usize, dma_buffer).unwrap());
                 current_buffer = (current_buffer + 1) % 2;
             } else {
                 break;
